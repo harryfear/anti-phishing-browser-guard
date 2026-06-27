@@ -1,0 +1,13 @@
+.DS_Store
+dist/
+*.zip
+
+# Brand-specific config and generated artifacts — keep the repo vendor-agnostic.
+# Provide config/brand.yml locally (or a CI secret) and run scripts/build-brand.mjs.
+config/brand.yml
+extension/brand.js
+extension/manifest.json
+policy/policy.json
+
+# Local chat transcript — never publish
+chat-export.md

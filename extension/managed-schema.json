@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft-03/schema#",
+  "type": "object",
+  "properties": {
+    "policyUrl": {
+      "title": "Policy URL",
+      "description": "HTTPS URL for the JSON anti-phishing policy.",
+      "type": "string"
+    }
+  }
+}

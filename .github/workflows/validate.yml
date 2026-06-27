@@ -1,0 +1,21 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build brand artifacts (generic example fallback)
+        run: node scripts/build-brand.mjs
+      - name: Validate policy
+        run: node scripts/validate-policy.mjs policy/policy.json
+      - name: Check extension manifest
+        run: node scripts/check-extension.mjs extension

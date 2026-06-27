@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/anti-phishing-policy.schema.json",
+  "title": "Anti-Phishing Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "policyId",
+    "updatedAt",
+    "refreshMinutes",
+    "actions",
+    "protectedDomains",
+    "protectedBrands",
+    "protectedEmailDomains",
+    "trustedHosts",
+    "trustedLoginHosts",
+    "denyHosts",
+    "reportEndpoint",
+    "infoUrl",
+    "messages"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "policyId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "refreshMinutes": {
+      "type": "integer",
+      "minimum": 15,
+      "maximum": 1440
+    },
+    "actions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warnThreshold", "blockThreshold", "identityChallengeMinutes"],
+      "properties": {
+        "warnThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "blockThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "identityChallengeMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      }
+    },
+    "protectedDomains": {
+      "$ref": "#/$defs/hostList"
+    },
+    "protectedBrands": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 2
+      }
+    },
+    "protectedEmailDomains": {
+      "$ref": "#/$defs/hostList"
+    },
+    "trustedHosts": {
+      "$ref": "#/$defs/hostPatternList"
+    },
+    "trustedLoginHosts": {
+      "$ref": "#/$defs/hostList"
+    },
+    "denyHosts": {
+      "$ref": "#/$defs/hostPatternList"
+    },
+    "reportEndpoint": {
+      "type": "string"
+    },
+    "reportEmail": {
+      "type": "string"
+    },
+    "infoUrl": {
+      "type": "string"
+    },
+    "approvedLoginUrl": {
+      "type": "string"
+    },
+    "approvedLoginLabel": {
+      "type": "string"
+    },
+    "messages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warnTitle", "warnBody", "blockTitle", "blockBody"],
+      "properties": {
+        "warnTitle": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warnBody": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blockTitle": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blockBody": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hostList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9.-]+\\.[a-z]{2,}$"
+      },
+      "uniqueItems": true
+    },
+    "hostPatternList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(\\*\\.)?[a-z0-9.-]+\\.[a-z]{2,}$"
+      },
+      "uniqueItems": true
+    }
+  }
+}

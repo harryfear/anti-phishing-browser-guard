@@ -1,0 +1,42 @@
+name: Package Extension
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Provide brand config (optional secret)
+        env:
+          BRAND_CONFIG_YML: ${{ secrets.BRAND_CONFIG_YML }}
+        run: |
+          if [ -n "$BRAND_CONFIG_YML" ]; then
+            mkdir -p config
+            printf '%s' "$BRAND_CONFIG_YML" > config/brand.yml
+            echo "Building with BRAND_CONFIG_YML secret."
+          else
+            echo "No brand secret set; building a generic extension from the example config."
+          fi
+      - name: Build brand artifacts
+        run: node scripts/build-brand.mjs
+      - name: Validate policy
+        run: node scripts/validate-policy.mjs policy/policy.json
+      - name: Check extension manifest
+        run: node scripts/check-extension.mjs extension
+      - name: Package Chrome extension
+        run: |
+          mkdir -p dist
+          cd extension
+          zip -r ../dist/anti-phishing-extension.zip . -x "*.DS_Store" -x "*.template.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anti-phishing-extension
+          path: dist/anti-phishing-extension.zip

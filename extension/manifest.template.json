@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "__EXT_NAME__",
+  "version": "0.1.0",
+  "description": "__EXT_DESCRIPTION__",
+  "permissions": ["alarms", "declarativeNetRequest", "downloads", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "storage": {
+    "managed_schema": "managed-schema.json"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["brand.js", "shared.js", "content.js"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "run_at": "document_start"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "__EXT_NAME__",
+    "default_popup": "options.html"
+  }
+}

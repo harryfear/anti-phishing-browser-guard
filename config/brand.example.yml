@@ -1,0 +1,65 @@
+# Brand configuration for the Anti-Phishing Guard build.
+#
+# Copy this file to config/brand.yml and fill in your organisation's values.
+# config/brand.yml is gitignored and is never committed, so the public repo
+# stays brand/vendor agnostic. The build (scripts/build-brand.mjs) reads this
+# file and generates:
+#   - extension/brand.js     (baked-in default policy)
+#   - extension/manifest.json (name/description injected)
+#   - policy/policy.json      (the subscription policy you host privately)
+#
+# If config/brand.yml is absent, the build falls back to THIS example file,
+# producing a harmless generic build.
+
+extension:
+  name: "Anti-Phishing Guard"
+  description: "Allowlist-first phishing guard with remote JSON policy updates."
+
+policy:
+  version: 1
+  policyId: "org-default"
+  refreshMinutes: 240
+  thresholds:
+    warn: 45
+    block: 80
+    identityChallengeMinutes: 5
+
+  # Human-readable brand names matched in page text.
+  protectedBrands:
+    - "Example Org"
+    - "ExampleOrg"
+
+  # Exact registrable domains your organisation owns.
+  protectedDomains:
+    - "example.com"
+
+  # Email domains that must never be entered on untrusted sites.
+  protectedEmailDomains:
+    - "example.com"
+
+  # Trusted hosts. Company-owned hosts are fully trusted; third-party platform
+  # wildcards (sharepoint/office/etc.) are scanned-through at runtime.
+  trustedHosts:
+    - "example.com"
+    - "*.example.com"
+    - "*.sharepoint.com"
+    - "*.office.com"
+
+  # Dedicated identity-provider login hosts (exact only, no wildcards).
+  trustedLoginHosts:
+    - "login.microsoftonline.com"
+    - "accounts.google.com"
+
+  denyHosts: []
+
+  reportEndpoint: ""
+  reportEmail: "security@example.com"
+  infoUrl: "https://example.com/security"
+  approvedLoginUrl: ""
+  approvedLoginLabel: "Open approved login"
+
+  messages:
+    warnTitle: "Check this sign-in page"
+    warnBody: "This page is asking for credentials but is not on the approved sign-in list."
+    blockTitle: "Possible phishing page blocked"
+    blockBody: "This page strongly resembles a protected sign-in page."

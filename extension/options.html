@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Anti-Phishing Guard</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <h1>Anti-Phishing Guard</h1>
+      <form id="settings-form">
+        <label for="policy-url">Policy URL</label>
+        <input id="policy-url" name="policy-url" type="url" placeholder="https://OWNER.github.io/REPO/policy.json">
+        <p id="managed-note" hidden>This policy URL is managed by browser policy.</p>
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button type="button" id="sync-now">Sync now</button>
+        </div>
+      </form>
+      <section aria-label="Status">
+        <dl>
+          <dt>Policy</dt>
+          <dd id="policy-id">-</dd>
+          <dt>Version</dt>
+          <dd id="policy-version">-</dd>
+          <dt>Last sync</dt>
+          <dd id="last-sync">Never</dd>
+          <dt>Error</dt>
+          <dd id="last-error">None</dd>
+        </dl>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
