@@ -104,20 +104,21 @@ The extension is allowlist-first for sign-in protection:
 - Unknown password pages alone are only a weak signal.
 - A protected email plus a password field on a non-fully-trusted host is block-level friction by default.
 - If a protected email was entered, any password field in the same tab during the next `identityChallengeMinutes` window is challenged again.
-- HTTPS pages with password forms targeting HTTP endpoints are warned as insecure credential transport.
+- Password forms that submit to an HTTP endpoint are **hard-blocked** as insecure credential transport (no unlock — a password must never go in plaintext).
 - Lookalike domains, protected-brand pages on untrusted hosts, punycode hosts, and suspicious form actions raise the score.
-- Content scripts run in all frames; child frames report findings to the top frame so only one warning UI renders.
+- Content scripts run in all frames; child frames report findings to the top frame so only one warning UI renders. When the top frame is itself a trusted host, a child frame's brand-mention-only signal is not escalated, so embedded document/media viewers don't raise false warnings.
 - Deny-listed hosts are also enforced with Manifest V3 dynamic `declarativeNetRequest` block rules.
 - The toolbar icon shows a guard-state badge: red **!** when **not protecting** (no real policy loaded — e.g. a generic build that has not been provisioned), amber **!** when protecting but the policy sync is failing or stale, and no badge when guarding normally. A placeholder `policyId` (`org-default`/`local-default`) with no successful sync counts as unconfigured, so a generic build distributed via the Web Store reads as "not protecting" until a real policy is provisioned (paste a policy URL, or push `policyUrl` via managed storage). The same state is shown as a banner on the options page.
 - Severity colour is consistent across surfaces: amber for warn, red for block, on banner, chip, and modal.
-- The modal's primary action is **Report to Internal Security** (copies a diagnostic blob to the clipboard and opens a prefilled `mailto:` to `reportEmail`); **Learn More** opens `infoUrl`; **Download a screenshot to attach** captures the page via the background `captureVisibleTab`.
-- The password-escape footer is only shown when the page actually involves a credential context; email-only/brand-only warnings get an informational modal.
-- On **warn** with a credential context, proceeding requires friction: an acknowledgement checkbox plus a countdown before **Enter password anyway** enables. On **block** there is no proceed action.
-- The modal traps focus, autofocuses the primary action, restores focus on close, and **Esc** collapses it to a persistent chip. There is no "approved login" destination — the extension blocks/warns only.
+- A brand-mention-only warning on an untrusted page starts minimised as a draggable corner chip (dims on hover; click to expand); the banner is draggable too. Draggable surfaces are clamped so at least half stays on-screen, and positions reset on reload.
+- The modal's primary action is **Report to Internal Security…**, which opens a sub-modal offering **With screenshot** / **Without screenshot** — both copy a diagnostic blob to the clipboard and open a prefilled `mailto:` to `reportEmail`, and **With screenshot** first captures the page via the background `captureVisibleTab`. **Learn More** (opening `infoUrl`) is demoted to a link at the foot of the modal.
+- On **warn** with a credential context, proceeding requires friction: an acknowledgement checkbox plus a countdown before **Enter password anyway** enables (email-only/brand-only warnings get an informational modal with no escape).
+- Blocks are tiered. A **soft block** (a protected email/password on an unrecognised but not-suspicious host) can be cleared only via a strict-consent unlock — **Unlock Anyway…** opens a second modal where the user retypes the site's registrable domain (the full host is also accepted) to confirm they've checked the address, unlocking credential entry for ~30s on that host (**Unlock for Now**). **Hard blocks** — deny-list, look-alike, punycode, brand+credential-harvest, and insecure transport — have no escape.
+- The modal traps focus, autofocuses the primary action, restores focus on close, and **Esc** collapses it to a persistent chip. There is no "approved login" destination — the extension blocks/warns/unlocks in place only.
 
 Remote policy is JSON data only; it must not contain executable logic, and is treated as untrusted input at runtime (thresholds clamped, public-suffix wildcards rejected, version rollback rejected, remote reporting cannot be newly enabled by policy alone, `reportEmail` constrained to a single clean address).
 
-`Enter password anyway` does not auto-submit; it dismisses the challenge so the user must submit again deliberately. This is not a complete DLP layer — a page the user continues on can still exfiltrate via JS/AJAX/beacons. Treat the pre-entry challenge as the main control.
+`Enter password anyway` (warn) and `Unlock for Now` (soft block) do not auto-submit; they dismiss the challenge for a short, host-scoped window so the user must submit again deliberately. This is not a complete DLP layer — a page the user continues on can still exfiltrate via JS/AJAX/beacons. Treat the pre-entry challenge as the main control.
 
 For production hardening, add detached policy signing with a public key embedded in the extension. OAuth consent phishing against the genuine IdP is out of scope for this page-level guard.
 
