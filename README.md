@@ -142,12 +142,15 @@ For production hardening, add detached policy signing with a public key embedded
     keystroke signals to distinguish text the user typed from content injected by
     the page.
 
-## Making The Repo Public
+## Staying vendor-agnostic
 
-`config/brand.yml` and the generated `extension/brand.js`, `extension/manifest.json`, and `policy/policy.json` are gitignored, so new commits stay generic. Two things to do before publishing:
+`config/brand.yml` and the generated `extension/brand.js`, `extension/manifest.json`, and `policy/policy.json` are gitignored, so commits stay generic — the repo carries no organisation-specific values. The `validate` workflow enforces this: it fails if a brand tell ever lands in a tracked file.
 
-- **Untrack the now-generated files** that were previously committed:
-  ```sh
-  git rm --cached extension/manifest.json policy/policy.json
-  ```
-- **Scrub git history** — earlier commits still contain the brand values (in `shared.js`, `policy.json`, etc.). Use `git filter-repo` (or start a fresh history) before making the repo public.
+To brand it for your own organisation, copy the template and build locally:
+
+```sh
+cp config/brand.example.yml config/brand.yml   # gitignored — your real values
+node scripts/build-brand.mjs
+```
+
+The real values live only in that local file (or the `BRAND_CONFIG_YML` CI secret used by the release workflow); they never enter git history.
