@@ -34,6 +34,14 @@ semantic versioning.
   Security…** / **Unlock Anyway…**); reporting opens a focused sub-modal with an
   optional screenshot; "Learn More" is demoted to a link at the foot.
 
+### Fixed
+
+- The "company email on an unapproved site" check no longer fires on a protected
+  address that merely *appears* in page content — e.g. an online document, email
+  compose box, or chat that displays the address. Only short field entries (and
+  real login `<input>`s) count as "entered", so a document that mentions your
+  security inbox no longer shows a false warning.
+
 ### Security
 
 - High-confidence phishing (deny-list, look-alike, punycode, brand +

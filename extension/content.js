@@ -291,14 +291,26 @@
     );
   }
 
+  // A login username/email field is short. A rich-text surface (a document body in
+  // an online editor, an email compose box, a chat) can *display* a protected email
+  // as content without the user typing their login — reading that whole blob as an
+  // "entered" credential is a false positive. So from non-input surfaces
+  // (contenteditable / role=textbox / textarea) we only accept short values; real
+  // login fields (<input>) are always considered.
+  const ENTERED_RICH_TEXT_MAX = 120;
+
   function collectEnteredValues() {
-    const values = Array.from(
+    const values = [];
+    const elements = Array.from(
       document.querySelectorAll("input,textarea,[contenteditable],[role='textbox']")
-    )
-      .filter(isVisibleTextValueElement)
-      .map(valueFromElement)
-      .map((value) => value.trim())
-      .filter(Boolean);
+    ).filter(isVisibleTextValueElement);
+
+    for (const element of elements) {
+      const value = valueFromElement(element).trim();
+      if (!value) continue;
+      if (!(element instanceof HTMLInputElement) && value.length > ENTERED_RICH_TEXT_MAX) continue;
+      values.push(value);
+    }
 
     const joined = values.join("");
     if (joined && joined !== values.join(" ")) values.push(joined);
