@@ -11,3 +11,6 @@ policy/policy.json
 
 # Local chat transcript — never publish
 chat-export.md
+
+# Private, hostable artifacts (real brand policies, etc.) — never publish.
+private/

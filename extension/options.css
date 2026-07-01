@@ -19,6 +19,47 @@ h1 {
   margin: 0 0 16px;
 }
 
+.guard-state {
+  align-items: center;
+  border: 1px solid;
+  border-radius: 6px;
+  display: flex;
+  font-size: 12.5px;
+  font-weight: 500;
+  gap: 8px;
+  line-height: 1.35;
+  margin: 0 0 16px;
+  padding: 9px 11px;
+}
+
+.guard-dot {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 9px;
+  width: 9px;
+}
+
+.guard-state.is-ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+.guard-state.is-ok .guard-dot { background: #2e7d32; }
+
+.guard-state.is-warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+.guard-state.is-warn .guard-dot { background: #f9a825; }
+
+.guard-state.is-critical {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+.guard-state.is-critical .guard-dot { background: #d32f2f; }
+
 form {
   display: grid;
   gap: 8px;
@@ -88,4 +129,14 @@ dd {
   font-size: 12px;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+dd a {
+  color: #1a73e8;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+dd a:hover {
+  text-decoration: underline;
 }

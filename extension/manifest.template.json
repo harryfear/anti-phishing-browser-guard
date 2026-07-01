@@ -1,10 +1,16 @@
 {
   "manifest_version": 3,
   "name": "__EXT_NAME__",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "__EXT_DESCRIPTION__",
   "permissions": ["alarms", "declarativeNetRequest", "downloads", "storage"],
   "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "storage": {
     "managed_schema": "managed-schema.json"
   },
@@ -24,6 +30,10 @@
   "options_page": "options.html",
   "action": {
     "default_title": "__EXT_NAME__",
-    "default_popup": "options.html"
+    "default_popup": "options.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
   }
 }

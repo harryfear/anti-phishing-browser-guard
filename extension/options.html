@@ -9,6 +9,10 @@
   <body>
     <main>
       <h1>Anti-Phishing Guard</h1>
+      <div id="guard-state" class="guard-state" role="status" aria-live="polite" hidden>
+        <span class="guard-dot" aria-hidden="true"></span>
+        <span id="guard-message"></span>
+      </div>
       <form id="settings-form">
         <label for="policy-url">Policy URL</label>
         <input id="policy-url" name="policy-url" type="url" placeholder="https://OWNER.github.io/REPO/policy.json">
@@ -28,6 +32,8 @@
           <dd id="last-sync">Never</dd>
           <dt>Error</dt>
           <dd id="last-error">None</dd>
+          <dt id="info-term" hidden>Learn more</dt>
+          <dd id="info-def" hidden><a id="info-link" target="_blank" rel="noopener noreferrer">Read more &#8599;</a></dd>
         </dl>
       </section>
     </main>

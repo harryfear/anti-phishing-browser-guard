@@ -13,6 +13,11 @@
   let warningHostObserver = null;
   let uiMode = "none"; // none | banner | chip | modal
   let renderedAction = null;
+  let bannerDragOffset = { x: 0, y: 0 }; // persisted banner drag, survives re-render
+  let chipDragOffset = { x: 0, y: 0 }; // persisted chip drag (reset on refresh/navigation)
+  let chipIsAuto = false; // chip shown because the warning is weak (brand-mention only), not user-collapsed
+  let softBlockBypassUntil = 0; // type-to-confirm escape window for a soft block
+  let softBlockBypassHost = ""; // host the soft-block escape was granted for
 
   policy = await loadPolicy();
   recentProtectedIdentity = await loadRecentIdentityHint();
@@ -21,6 +26,15 @@
   bindInputRecheck();
   bindDomRecheck();
   bindFrameEvaluationUpdates();
+
+  window.addEventListener("resize", () => {
+    if (!warningRoot) return;
+    if (uiMode === "banner") {
+      applyDragOffset(warningRoot.querySelector(".apg-banner"), () => bannerDragOffset, (o) => { bannerDragOffset = o; });
+    } else if (uiMode === "chip") {
+      applyDragOffset(warningRoot.querySelector("#apg-chip"), () => chipDragOffset, (o) => { chipDragOffset = o; });
+    }
+  });
 
   async function loadPolicy() {
     try {
@@ -119,26 +133,65 @@
       return;
     }
 
-    lastEvaluation = strongestEvaluation([
-      pageEvaluation,
-      ...(await loadFrameEvaluations())
-    ]);
+    // Trust-aware frame aggregation: when the TOP frame is itself a trusted host
+    // (e.g. an Office/SharePoint doc on *.sharepoint.com), don't let a benign
+    // embedded viewer iframe escalate on a brand-mention alone — Office renders
+    // documents in nested iframes on hosts like *.officeapps.live.com that carry
+    // the doc title. Stronger child-frame signals (credential, identity, deny,
+    // lookalike, insecure transport) still warn.
+    const topHost = PhishGuard.normalizeHost(
+      window.location.hostname || PhishGuard.hostFromUrl(window.location.href)
+    );
+    const topTrusted =
+      PhishGuard.trustedContextHost(topHost, policy) ||
+      PhishGuard.fullyTrustedHost(topHost, policy);
+    const frameEvaluations = await loadFrameEvaluations();
+    const consideredFrames = topTrusted
+      ? frameEvaluations.filter((evaluation) => !isBrandMentionOnly(evaluation))
+      : frameEvaluations;
+
+    lastEvaluation = strongestEvaluation([pageEvaluation, ...consideredFrames]);
 
     if (lastEvaluation.action === "allow") {
       if (uiMode !== "none") removeWarning();
       return;
     }
 
-    // Only (re)build the UI on a genuine state transition. An open modal or a
-    // user-collapsed chip is left untouched so background re-evaluations can't
-    // destroy it mid-interaction. Actual credential submission is still caught
-    // by the submit guard regardless of which surface is showing.
+    // A soft block the user cleared via the type-to-confirm challenge: stay hidden
+    // for the short bypass window so they can complete credential entry.
+    if (isSoftBlock(lastEvaluation) && withinSoftBypass()) {
+      if (uiMode !== "none") removeWarning();
+      return;
+    }
+
+    // A warning whose ONLY trigger is a brand mention on an untrusted site is weak
+    // and a full banner is too invasive (e.g. a legit registry/news page that just
+    // names the company). Start it minimized as the corner chip; clicking the chip
+    // opens the full banner. Stronger evaluations still open the banner/modal, and
+    // an auto-minimized chip is escalated if a later re-eval finds more than a brand
+    // mention (e.g. the user then enters a password).
+    const brandMentionOnly = isBrandMentionOnly(lastEvaluation);
+
+    // Only (re)build the UI on a genuine state transition. An open modal is never
+    // disturbed; a user-collapsed chip is kept; an auto chip is kept only while the
+    // evaluation stays brand-mention-only. This stops background re-evaluations from
+    // destroying a surface mid-interaction. Credential submission is still caught by
+    // the submit guard regardless of which surface is showing.
     let rendered = false;
-    if (uiMode === "modal" || uiMode === "chip") {
-      // Leave the current surface in place.
+    if (uiMode === "modal") {
+      // Never disturb an open modal.
+    } else if (uiMode === "chip" && (chipIsAuto ? brandMentionOnly : true)) {
+      // Keep the chip (user-collapsed always; auto chip while still weak).
     } else if (shouldShowPreEntryModal(lastEvaluation)) {
       renderInterstitial(lastEvaluation);
       rendered = true;
+    } else if (brandMentionOnly) {
+      // Auto-minimize only on the first appearance. If the user has already opened
+      // the banner from the chip, leave it; if it's a chip, the guard above kept it.
+      if (uiMode === "none") {
+        renderCollapsedIcon(lastEvaluation, true);
+        rendered = true;
+      }
     } else if (uiMode !== "banner" || renderedAction !== lastEvaluation.action) {
       renderWarning(lastEvaluation);
       rendered = true;
@@ -223,6 +276,10 @@
         }
         if (bypassNextSubmit && evaluation.action === "warn") {
           bypassNextSubmit = false;
+          return;
+        }
+        // Soft block the user cleared via the type-to-confirm challenge.
+        if (isSoftBlock(evaluation) && withinSoftBypass()) {
           return;
         }
 
@@ -333,6 +390,40 @@
     return 0;
   }
 
+  // A frame evaluation whose ONLY signal is a brand mention. Such a frame is weak
+  // evidence on its own; under a trusted top frame it is suppressed (embedded
+  // viewer noise), but anywhere else it is still aggregated normally.
+  function isBrandMentionOnly(evaluation) {
+    const signals = Array.isArray(evaluation && evaluation.signals) ? evaluation.signals : [];
+    return signals.length > 0 && signals.every((signal) => signal === "protected-brand-on-untrusted-host");
+  }
+
+  // Hard-block signals: high-confidence phishing and insecure transport. A block
+  // carrying any of these has NO escape. A "soft" block (work credentials on an
+  // untrusted-but-not-suspicious host) can be cleared via the type-to-confirm flow.
+  const HARD_BLOCK_SIGNALS = [
+    "deny-host",
+    "protected-lookalike-host",
+    "punycode-host",
+    "credential-harvest-risk",
+    "protected-brand-on-untrusted-host",
+    "password-form-targets-http"
+  ];
+
+  function isSoftBlock(evaluation) {
+    if (!evaluation || evaluation.action !== "block") return false;
+    const signals = evaluation.signals || [];
+    return !signals.some((signal) => HARD_BLOCK_SIGNALS.includes(signal));
+  }
+
+  // True while a user-confirmed soft-block escape is still valid for this host.
+  function withinSoftBypass() {
+    return (
+      Date.now() < softBlockBypassUntil &&
+      PhishGuard.normalizeHost(location.hostname) === softBlockBypassHost
+    );
+  }
+
   function isVisibleCredentialElement(element) {
     if (!(element instanceof HTMLElement)) return false;
     if (element.hidden || element.getAttribute("aria-hidden") === "true") return false;
@@ -417,6 +508,44 @@
       </svg>`;
   }
 
+  function downloadIcon() {
+    return `
+      <svg class="apg-btn-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>`;
+  }
+
+  function mailIcon() {
+    return `
+      <svg class="apg-btn-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
+        <path d="m4 7 8 6 8-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>`;
+  }
+
+  function backIcon() {
+    return `
+      <svg class="apg-btn-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>`;
+  }
+
+  function externalIcon() {
+    return `
+      <svg class="apg-btn-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M7 17 17 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>`;
+  }
+
+  function unlockIcon() {
+    return `
+      <svg class="apg-btn-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="5" y="11" width="13" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
+        <path d="M8.5 11V7.4A3.4 3.4 0 0 1 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+      </svg>`;
+  }
+
   function renderWarning(evaluation) {
     const root = ensureRoot();
     uiMode = "banner";
@@ -442,11 +571,105 @@
 
     root.querySelector("#apg-close").addEventListener("click", () => renderCollapsedIcon(evaluation));
     root.querySelector("#apg-review").addEventListener("click", () => renderInterstitial(evaluation));
+    makeDraggable(
+      root.querySelector(".apg-banner"),
+      () => bannerDragOffset,
+      (o) => { bannerDragOffset = o; },
+      false
+    );
   }
 
-  function renderCollapsedIcon(evaluation) {
+  // Clamp a drag offset so at least 50% of the element stays within the viewport.
+  function clampDragOffset(el, offset) {
+    const prevTransform = el.style.transform;
+    el.style.transform = "none";
+    const base = el.getBoundingClientRect();
+    el.style.transform = prevTransform;
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    const minVisibleX = base.width / 2;
+    const minVisibleY = base.height / 2;
+    return {
+      x: Math.max(-base.left - (base.width - minVisibleX), Math.min(vw - base.left - minVisibleX, offset.x)),
+      y: Math.max(-base.top - (base.height - minVisibleY), Math.min(vh - base.top - minVisibleY, offset.y))
+    };
+  }
+
+  function applyDragOffset(el, getOffset, setOffset) {
+    if (!el) return;
+    const o = clampDragOffset(el, getOffset());
+    setOffset(o);
+    el.style.transform = `translate(${o.x}px, ${o.y}px)`;
+  }
+
+  // Make an element draggable, clamped so ≥50% stays on-screen and the offset
+  // persists (via getOffset/setOffset) across re-renders. A small movement
+  // threshold distinguishes a drag from a click, so a draggable *button* (the chip)
+  // still fires its click when tapped rather than dragged. Pass dragWholeElement
+  // for the chip; for the banner, drags starting on a control are ignored.
+  function makeDraggable(el, getOffset, setOffset, dragWholeElement) {
+    if (!el) return;
+    applyDragOffset(el, getOffset, setOffset);
+
+    let dragging = false;
+    let moved = false;
+    let startX = 0;
+    let startY = 0;
+    let startOffset = { x: 0, y: 0 };
+    const THRESHOLD = 4;
+
+    el.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      if (!dragWholeElement && event.target.closest("button, a, input, label")) return;
+      dragging = true;
+      moved = false;
+      startX = event.clientX;
+      startY = event.clientY;
+      startOffset = { ...getOffset() };
+      el.setPointerCapture(event.pointerId);
+    });
+
+    el.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      if (!moved && Math.hypot(dx, dy) < THRESHOLD) return;
+      moved = true;
+      el.classList.add("apg-dragging");
+      const o = clampDragOffset(el, { x: startOffset.x + dx, y: startOffset.y + dy });
+      setOffset(o);
+      el.style.transform = `translate(${o.x}px, ${o.y}px)`;
+    });
+
+    const endDrag = (event) => {
+      if (!dragging) return;
+      dragging = false;
+      el.classList.remove("apg-dragging");
+      try {
+        el.releasePointerCapture(event.pointerId);
+      } catch (_) {
+        /* pointer already released */
+      }
+    };
+    el.addEventListener("pointerup", endDrag);
+    el.addEventListener("pointercancel", endDrag);
+    el.addEventListener(
+      "click",
+      (event) => {
+        if (moved) {
+          event.preventDefault();
+          event.stopPropagation();
+          moved = false;
+        }
+      },
+      true
+    );
+  }
+
+  function renderCollapsedIcon(evaluation, auto = false) {
     const root = ensureRoot();
     uiMode = "chip";
+    chipIsAuto = auto;
     const block = evaluation.action === "block";
     root.innerHTML = `
       <style>${styles()}</style>
@@ -457,7 +680,13 @@
       </div>
     `;
 
-    root.querySelector("#apg-chip").addEventListener("click", () => renderInterstitial(evaluation));
+    root.querySelector("#apg-chip").addEventListener("click", () => renderWarning(evaluation));
+    makeDraggable(
+      root.querySelector("#apg-chip"),
+      () => chipDragOffset,
+      (o) => { chipDragOffset = o; },
+      true
+    );
   }
 
   function renderInterstitial(evaluation, form) {
@@ -489,8 +718,8 @@
                 <span class="apg-host">${escapeHtml(displayHost(evaluation))}</span>
               </div>
               <p class="apg-lede" id="apg-lede">${escapeHtml(copy.body)}</p>
-              <div class="apg-reasons" aria-label="Why you're seeing this">
-                <strong>Why you're seeing this</strong>
+              <div class="apg-reasons" aria-label="Why am I seeing this">
+                <strong>Why am I seeing this?</strong>
                 <ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>
               </div>
               <details class="apg-technical">
@@ -503,10 +732,12 @@
               </details>
             </div>
             <div class="apg-actions">
-              <button type="button" class="apg-primary" id="apg-report">${shieldIcon()}<span>Report to Internal Security</span></button>
-              ${learn ? `<button type="button" class="apg-secondary" id="apg-learn">${infoIcon()}<span>Learn More</span></button>` : ""}
-              <button type="button" class="apg-link" id="apg-shot">Download a screenshot to attach</button>
-              <p class="apg-confirm" id="apg-confirm" role="status" hidden></p>
+              <button type="button" class="apg-primary" id="apg-report">${mailIcon()}<span>Report to Internal Security…</span></button>
+              ${
+                isSoftBlock(evaluation)
+                  ? `<button type="button" class="apg-secondary" id="apg-proceed">${unlockIcon()}<span>Unlock Anyway…</span></button>`
+                  : ""
+              }
             </div>
             ${
               showEscape
@@ -520,12 +751,165 @@
             </div>`
                 : ""
             }
+            ${learn ? `<a class="apg-learn-foot" id="apg-learn" href="#" role="button"><span>Learn More</span>${externalIcon()}</a>` : ""}
           </section>
         </div>
       </div>
     `;
 
     wireInterstitial(root, evaluation, showEscape);
+  }
+
+  // Second-stage "Are you sure?" for a SOFT block. To proceed the user must type
+  // the site's registrable domain (the full host is also accepted) — forcing them
+  // to read and verify the endpoint. On success, credential entry is unblocked for
+  // this host for a short window.
+  function renderProceedChallenge(evaluation) {
+    const root = ensureRoot();
+    uiMode = "modal";
+    const host = PhishGuard.normalizeHost(location.hostname);
+    const registrable = PhishGuard.siteKey(host) || host;
+
+    root.innerHTML = `
+      <style>${styles()}</style>
+      <div class="apg apg-is-block">
+        <div class="apg-overlay" role="presentation">
+          <section class="apg-panel" role="dialog" aria-modal="true" aria-labelledby="apg-ctitle" aria-describedby="apg-clede">
+            <div class="apg-head">
+              <span class="apg-hico">${warningIcon()}</span>
+              <h1 class="apg-title" id="apg-ctitle">Are you sure?</h1>
+              <button type="button" class="apg-x" id="apg-cx" aria-label="Close">&times;</button>
+            </div>
+            <div class="apg-bodywrap">
+              <p class="apg-lede" id="apg-clede">Only continue if you are certain this is the genuine site. Phishing pages copy real ones closely — check the address carefully.</p>
+              <div class="apg-evidence">
+                <span class="apg-evidence-label">You're on</span>
+                <span class="apg-host">${escapeHtml(host)}</span>
+              </div>
+              <label class="apg-confirm-label" for="apg-domain">To continue, type this site's domain exactly:</label>
+              <div class="apg-confirm-target" aria-hidden="true">${escapeHtml(registrable)}</div>
+              <input class="apg-confirm-input" id="apg-domain" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Type the site's domain to continue" placeholder="type the domain to continue">
+            </div>
+            <div class="apg-actions">
+              <button type="button" class="apg-proceed-go" id="apg-proceed-go" disabled><span>Unlock for Now</span></button>
+              <button type="button" class="apg-back-link" id="apg-back">${backIcon()}<span>Back to safety</span></button>
+            </div>
+          </section>
+        </div>
+      </div>
+    `;
+
+    const input = root.querySelector("#apg-domain");
+    const go = root.querySelector("#apg-proceed-go");
+    const normalize = (value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/[/?#].*$/, "")
+        .replace(/\.$/, "");
+    const check = () => {
+      const typed = normalize(input.value);
+      go.disabled = !(typed && (typed === registrable || typed === host));
+    };
+    input.addEventListener("input", check);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (!go.disabled) go.click();
+      }
+    });
+
+    go.addEventListener("click", () => {
+      if (go.disabled) return;
+      softBlockBypassUntil = Date.now() + 30 * 1000;
+      softBlockBypassHost = host;
+      bypassNextSubmit = true;
+      removeWarning();
+      const password = document.querySelector("input[type='password']");
+      if (password) password.focus();
+    });
+
+    root.querySelector("#apg-cx").addEventListener("click", () => renderCollapsedIcon(evaluation));
+    root.querySelector("#apg-back").addEventListener("click", () => renderInterstitial(evaluation));
+    bindFocusTrap(root, root.querySelector(".apg-overlay"), root.querySelector(".apg-panel"), evaluation);
+    input.focus();
+  }
+
+  // Report sub-modal (opened from "Report to Internal Security"). The screenshot
+  // choice lives here as two buttons; both copy the diagnostics and open a
+  // prefilled email to the security inbox.
+  function renderReportChoice(evaluation) {
+    const root = ensureRoot();
+    uiMode = "modal";
+    const email = String(evaluation.policy.reportEmail || "").trim();
+
+    root.innerHTML = `
+      <style>${styles()}</style>
+      <div class="apg ${evaluation.action === "block" ? "apg-is-block" : ""}">
+        <div class="apg-overlay" role="presentation">
+          <section class="apg-panel" role="dialog" aria-modal="true" aria-labelledby="apg-rtitle">
+            <div class="apg-head">
+              <span class="apg-hico">${shieldIcon()}</span>
+              <h1 class="apg-title" id="apg-rtitle">Report to Internal Security</h1>
+              <button type="button" class="apg-x" id="apg-rx" aria-label="Close">&times;</button>
+            </div>
+            <div class="apg-bodywrap">
+              <p class="apg-lede">We'll copy the details and open an email${email ? " to " + escapeHtml(email) : ""} — just press send. A screenshot helps the team see exactly what you saw.</p>
+            </div>
+            <div class="apg-actions">
+              <button type="button" class="apg-primary" id="apg-report-shot">${downloadIcon()}<span>With screenshot</span></button>
+              <button type="button" class="apg-secondary" id="apg-report-plain">${mailIcon()}<span>Without screenshot</span></button>
+              <p class="apg-confirm" id="apg-confirm" role="status" hidden></p>
+              <button type="button" class="apg-back-link" id="apg-report-back">${backIcon()}<span>Back</span></button>
+            </div>
+          </section>
+        </div>
+      </div>
+    `;
+
+    const confirmEl = root.querySelector("#apg-confirm");
+    const setConfirm = (message) => {
+      if (!confirmEl) return;
+      confirmEl.hidden = false;
+      confirmEl.textContent = message;
+    };
+
+    root.querySelector("#apg-rx").addEventListener("click", () => renderCollapsedIcon(evaluation));
+    root.querySelector("#apg-report-back").addEventListener("click", () => renderInterstitial(evaluation));
+    root
+      .querySelector("#apg-report-shot")
+      .addEventListener("click", (event) => sendReport(evaluation, true, setConfirm, event.currentTarget));
+    root
+      .querySelector("#apg-report-plain")
+      .addEventListener("click", (event) => sendReport(evaluation, false, setConfirm, event.currentTarget));
+    bindFocusTrap(root, root.querySelector(".apg-overlay"), root.querySelector(".apg-panel"), evaluation);
+  }
+
+  async function sendReport(evaluation, withScreenshot, setConfirm, button) {
+    if (withScreenshot) {
+      if (button) button.disabled = true;
+      setConfirm("Capturing screenshot…");
+      const saved = await captureScreenshotToDownload();
+      if (button) button.disabled = false;
+      if (!saved) {
+        setConfirm("Couldn't capture a screenshot — continuing without it.");
+      }
+    }
+    const text = buildReportText(evaluation);
+    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+    const email = String(evaluation.policy.reportEmail || "").trim();
+    const prefix = withScreenshot ? "Screenshot saved to your Downloads. " : "";
+    if (email) {
+      const subject = "Suspicious sign-in page flagged by Anti-Phishing Guard";
+      window.open(
+        "mailto:" + email + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(text),
+        "_self"
+      );
+      setConfirm(prefix + "Details copied — opening your email to " + email + (withScreenshot ? ". Attach the screenshot." : "."));
+    } else {
+      setConfirm(prefix + "Report details copied to your clipboard.");
+    }
   }
 
   function hasCredentialContext(evaluation) {
@@ -543,50 +927,20 @@
   function wireInterstitial(root, evaluation, showEscape) {
     const overlay = root.querySelector(".apg-overlay");
     const panel = root.querySelector(".apg-panel");
-    const confirmEl = root.querySelector("#apg-confirm");
-    const setConfirm = (message) => {
-      if (!confirmEl) return;
-      confirmEl.hidden = false;
-      confirmEl.textContent = message;
-    };
-
     root.querySelector("#apg-x").addEventListener("click", () => renderCollapsedIcon(evaluation));
 
-    root.querySelector("#apg-report").addEventListener("click", () => {
-      const text = buildReportText(evaluation);
-      if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
-      const email = String(evaluation.policy.reportEmail || "").trim();
-      if (email) {
-        const subject = "Suspicious sign-in page flagged by Anti-Phishing Guard";
-        window.open(
-          "mailto:" + email + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(text),
-          "_self"
-        );
-        setConfirm("Details copied — opening your email to " + email + ".");
-      } else {
-        setConfirm("Report details copied to your clipboard.");
-      }
-    });
+    root.querySelector("#apg-report").addEventListener("click", () => renderReportChoice(evaluation));
 
-    const learnButton = root.querySelector("#apg-learn");
-    if (learnButton) {
-      learnButton.addEventListener("click", () => {
-        window.open(learnUrl(evaluation), "_blank", "noopener,noreferrer");
-      });
+    const proceedButton = root.querySelector("#apg-proceed");
+    if (proceedButton) {
+      proceedButton.addEventListener("click", () => renderProceedChallenge(evaluation));
     }
 
-    const shotButton = root.querySelector("#apg-shot");
-    if (shotButton) {
-      shotButton.addEventListener("click", async () => {
-        shotButton.disabled = true;
-        setConfirm("Capturing screenshot…");
-        const saved = await captureScreenshotToDownload();
-        shotButton.disabled = false;
-        setConfirm(
-          saved
-            ? "Screenshot saved to your Downloads — attach it to the email."
-            : "Couldn't capture a screenshot. Use your system screenshot tool instead."
-        );
+    const learnLink = root.querySelector("#apg-learn");
+    if (learnLink) {
+      learnLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        window.open(learnUrl(evaluation), "_blank", "noopener,noreferrer");
       });
     }
 
@@ -829,6 +1183,9 @@
   function removeWarning() {
     uiMode = "none";
     renderedAction = null;
+    chipIsAuto = false;
+    bannerDragOffset = { x: 0, y: 0 };
+    chipDragOffset = { x: 0, y: 0 };
     if (warningHostObserver) {
       warningHostObserver.disconnect();
       warningHostObserver = null;
@@ -963,6 +1320,16 @@
         padding: 12px 14px;
         box-shadow: 0 10px 30px rgba(20, 20, 20, 0.16);
         line-height: 1.35;
+        cursor: move;
+        touch-action: none;
+        user-select: none;
+      }
+      .apg-banner.apg-dragging {
+        cursor: grabbing;
+        box-shadow: 0 16px 40px rgba(20, 20, 20, 0.28);
+      }
+      .apg-bact button {
+        cursor: pointer;
       }
       .apg-bico {
         flex: 0 0 auto;
@@ -1027,6 +1394,20 @@
         justify-content: center;
         box-shadow: 0 10px 30px rgba(20, 20, 20, 0.28);
         padding: 0;
+        cursor: move;
+        touch-action: none;
+        user-select: none;
+        opacity: 1;
+        transition: opacity 0.15s ease;
+      }
+      /* Dim on hover so the user can see what the chip is covering */
+      .apg-chip:hover {
+        opacity: 0.5;
+      }
+      .apg-chip.apg-dragging {
+        cursor: grabbing;
+        opacity: 0.5;
+        box-shadow: 0 16px 40px rgba(20, 20, 20, 0.4);
       }
 
       .apg-overlay {
@@ -1061,6 +1442,11 @@
         color: var(--accent);
         flex: 0 0 auto;
         margin-top: 2px;
+      }
+      .apg-hico svg {
+        display: block;
+        width: 24px;
+        height: 24px;
       }
       .apg-title {
         font-size: 20px;
@@ -1117,6 +1503,26 @@
         font-size: 12px;
         margin-bottom: 5px;
         color: var(--accent-ink);
+      }
+      /* "Learn more" pinned at the very bottom of the modal */
+      .apg-learn-foot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 12px 24px 18px;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--muted);
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .apg-learn-foot:hover {
+        color: var(--ink);
+      }
+      .apg-learn-foot .apg-btn-ico {
+        width: 14px;
+        height: 14px;
       }
       .apg-reasons ul {
         margin: 0;
@@ -1223,6 +1629,79 @@
         color: var(--safe);
         margin: 4px 0 0;
         line-height: 1.4;
+      }
+
+      /* Shared "Back" link (report sub-modal + proceed challenge) */
+      .apg-back-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        background: none;
+        border: 0;
+        color: var(--muted);
+        font-size: 12.5px;
+        font-weight: 600;
+        padding: 4px 0 0;
+        cursor: pointer;
+      }
+      .apg-back-link:hover {
+        color: var(--ink);
+      }
+
+      /* Type-to-confirm challenge */
+      .apg-confirm-label {
+        display: block;
+        font-size: 13px;
+        color: var(--ink);
+        margin: 16px 0 10px;
+      }
+      .apg-confirm-target {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--accent-ink);
+        background: var(--tint);
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        word-break: break-all;
+        user-select: none;
+      }
+      .apg-confirm-input {
+        width: 100%;
+        box-sizing: border-box;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 14px;
+        padding: 11px 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        color: var(--ink);
+        margin-bottom: 10px;
+      }
+      .apg-confirm-input:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .apg-proceed-go {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 9px;
+        padding: 11px 16px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .apg-proceed-go:disabled {
+        background: #cbd5e1;
+        color: #6b7280;
+        cursor: not-allowed;
       }
 
       .apg-foot {

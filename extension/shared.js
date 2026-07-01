@@ -385,7 +385,10 @@
 
     const warnThreshold = Number(policy.actions.warnThreshold || DEFAULT_POLICY.actions.warnThreshold);
     const blockThreshold = Number(policy.actions.blockThreshold || DEFAULT_POLICY.actions.blockThreshold);
-    const action = score >= blockThreshold ? "block" : score >= warnThreshold ? "warn" : "allow";
+    let action = score >= blockThreshold ? "block" : score >= warnThreshold ? "warn" : "allow";
+    // Insecure credential transport (a password form posting over HTTP) is always a
+    // hard block — there is no safe way to send a password in plaintext.
+    if (signals.includes("password-form-targets-http")) action = "block";
 
     return { action, score, signals, policy };
   }
@@ -395,6 +398,7 @@
     clone,
     evaluatePage,
     fullyTrustedHost,
+    trustedContextHost,
     protectedIdentityEntered,
     hostFromUrl,
     hostInList,

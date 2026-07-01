@@ -31,8 +31,23 @@ async function refreshStatus() {
   policyUrlInput.disabled = status.policyUrlManaged;
   managedNote.hidden = !status.policyUrlManaged;
 
+  const guard = status.guard || { level: "ok", message: "" };
+  const guardState = document.getElementById("guard-state");
+  guardState.className = `guard-state is-${guard.level}`;
+  guardState.hidden = false;
+  document.getElementById("guard-message").textContent = guard.message || "";
+
   document.getElementById("policy-id").textContent = status.policy.policyId || "-";
   document.getElementById("policy-version").textContent = String(status.policy.version || "-");
   document.getElementById("last-sync").textContent = status.lastSyncAt || "Never";
   document.getElementById("last-error").textContent = status.lastSyncError || "None";
+
+  const infoUrl = (status.policy.infoUrl || "").trim();
+  const infoTerm = document.getElementById("info-term");
+  const infoDef = document.getElementById("info-def");
+  const infoLink = document.getElementById("info-link");
+  const showInfo = /^https:\/\//i.test(infoUrl);
+  if (showInfo) infoLink.href = infoUrl;
+  infoTerm.hidden = !showInfo;
+  infoDef.hidden = !showInfo;
 }

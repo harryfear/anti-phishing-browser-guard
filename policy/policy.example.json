@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "policyId": "org-default",
+  "updatedAt": "2026-06-27T08:22:37.369Z",
+  "refreshMinutes": 240,
+  "actions": {
+    "warnThreshold": 45,
+    "blockThreshold": 80,
+    "identityChallengeMinutes": 5
+  },
+  "protectedDomains": [
+    "example.com"
+  ],
+  "protectedBrands": [
+    "Example Org",
+    "ExampleOrg"
+  ],
+  "protectedEmailDomains": [
+    "example.com"
+  ],
+  "trustedHosts": [
+    "example.com",
+    "*.example.com",
+    "*.sharepoint.com",
+    "*.office.com"
+  ],
+  "trustedLoginHosts": [
+    "login.microsoftonline.com",
+    "accounts.google.com"
+  ],
+  "denyHosts": [],
+  "reportEndpoint": "",
+  "reportEmail": "security@example.com",
+  "infoUrl": "https://example.com/security",
+  "approvedLoginUrl": "",
+  "approvedLoginLabel": "Open approved login",
+  "messages": {
+    "warnTitle": "Check this sign-in page",
+    "warnBody": "This page is asking for credentials but is not on the approved sign-in list.",
+    "blockTitle": "Possible phishing page blocked",
+    "blockBody": "This page strongly resembles a protected sign-in page."
+  }
+}

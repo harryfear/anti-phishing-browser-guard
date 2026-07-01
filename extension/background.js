@@ -41,6 +41,11 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.alarms.create(DEFAULT_ALARM_NAME, { periodInMinutes: 60 });
   await syncPolicy();
   await syncDenyHostRules(await getPolicy());
+  await updateActionBadge();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  updateActionBadge();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -64,6 +69,7 @@ async function handleMessage(message, sender) {
       return { ok: true, status: await getStatus() };
     case "SET_POLICY_URL":
       await storageSet({ [STORAGE_KEYS.policyUrl]: String(message.policyUrl || "").trim() });
+      await syncPolicy({ force: true });
       return { ok: true, status: await getStatus() };
     case "SYNC_POLICY":
       await syncPolicy({ force: true });
@@ -136,24 +142,32 @@ async function getStatus() {
   const managedPolicyUrl = await readManagedPolicyUrl();
   const policy = PhishGuard.normalizePolicy(values[STORAGE_KEYS.policy]);
 
-  return {
+  const status = {
     policy,
     policyUrl: managedPolicyUrl || values[STORAGE_KEYS.policyUrl] || "",
     policyUrlManaged: Boolean(managedPolicyUrl),
     lastSyncAt: values[STORAGE_KEYS.lastSyncAt] || "",
     lastSyncError: values[STORAGE_KEYS.lastSyncError] || ""
   };
+  status.guard = computeGuardState(status);
+  return status;
 }
 
 async function syncPolicy(options = {}) {
   const policyUrl = await getPolicyUrl();
-  if (!policyUrl) return;
+  if (!policyUrl) {
+    await updateActionBadge();
+    return;
+  }
 
   const current = await getStatus();
   const refreshMinutes = Number(current.policy.refreshMinutes || 240);
   const lastSyncAt = Date.parse(current.lastSyncAt || "");
   const syncDue = !lastSyncAt || Date.now() - lastSyncAt >= refreshMinutes * 60 * 1000;
-  if (!options.force && !syncDue) return;
+  if (!options.force && !syncDue) {
+    await updateActionBadge();
+    return;
+  }
 
   try {
     const response = await fetch(policyUrl, {
@@ -176,6 +190,81 @@ async function syncPolicy(options = {}) {
     await storageSet({
       [STORAGE_KEYS.lastSyncError]: error.message
     });
+  }
+  await updateActionBadge();
+}
+
+// Reflect the guard's real protection state on the toolbar icon and options page:
+//   critical (red "!")  -> not protecting (no usable policy loaded)
+//   warn (amber "!")     -> protecting, but the configured policy sync is failing or stale
+//   ok (no badge)        -> guarding normally
+// Baked-in policyIds that mean "this is just the generic/inert placeholder, not a
+// real provisioned policy". A real brand build (or a synced remote policy) uses its
+// own policyId, so a generic store build correctly reads as unconfigured until a
+// real policy is provisioned via the policy URL.
+const PLACEHOLDER_POLICY_IDS = new Set(["local-default", "org-default"]);
+
+function computeGuardState(status) {
+  const policy = status.policy || {};
+  const hasProtection =
+    Array.isArray(policy.protectedDomains) && policy.protectedDomains.length > 0;
+  const isPlaceholder = PLACEHOLDER_POLICY_IDS.has(String(policy.policyId || ""));
+  const hasUrl = Boolean(status.policyUrl);
+  const lastSyncAt = Date.parse(status.lastSyncAt || "");
+  const synced = Boolean(lastSyncAt);
+  const refreshMs = Math.max(15, Number(policy.refreshMinutes || 240)) * 60 * 1000;
+  const stale = hasUrl && (!lastSyncAt || Date.now() - lastSyncAt > refreshMs * 2);
+  const hasError = Boolean(status.lastSyncError);
+
+  // Not protecting: no real protected domains, or still running the placeholder
+  // policy with no successful remote sync yet.
+  if (!hasProtection || (isPlaceholder && !synced)) {
+    return {
+      level: "critical",
+      message: hasUrl
+        ? "Not protecting — a policy URL is set but no valid policy has loaded yet."
+        : "Not protecting — no policy configured. Set a policy URL below."
+    };
+  }
+  if (hasError) {
+    return {
+      level: "warn",
+      message: `Protecting, but the last policy sync failed: ${status.lastSyncError}`
+    };
+  }
+  if (stale) {
+    return {
+      level: "warn",
+      message: "Protecting, but the policy is stale (sync is overdue)."
+    };
+  }
+  return {
+    level: "ok",
+    message: `Guarding — policy ${policy.policyId || "default"} v${policy.version || 1}.`
+  };
+}
+
+const BADGE_BY_LEVEL = {
+  critical: { text: "!", color: "#D32F2F" },
+  warn: { text: "!", color: "#F9A825" },
+  ok: { text: "", color: "#2E7D32" }
+};
+
+async function updateActionBadge() {
+  if (!chrome.action) return;
+  try {
+    const state = computeGuardState(await getStatus());
+    const badge = BADGE_BY_LEVEL[state.level] || BADGE_BY_LEVEL.ok;
+    await chrome.action.setBadgeText({ text: badge.text });
+    if (badge.text) {
+      await chrome.action.setBadgeBackgroundColor({ color: badge.color });
+      if (chrome.action.setBadgeTextColor) {
+        await chrome.action.setBadgeTextColor({ color: "#FFFFFF" });
+      }
+    }
+    await chrome.action.setTitle({ title: `Anti-Phishing Guard: ${state.message}` });
+  } catch (_) {
+    // Badge updates must never break policy sync.
   }
 }
 

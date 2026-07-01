@@ -48,7 +48,8 @@ extension/
   content.js              Page inspection, banner, modal, form guard
   options.*               Policy URL/status UI
 policy/
-  policy.json         Generated subscription policy (gitignored) — host privately
+  policy.example.json  Example/template subscription policy (committed)
+  policy.json          Generated subscription policy (gitignored) — host privately
 schema/
   policy.schema.json  JSON Schema for the policy
 scripts/
@@ -79,7 +80,7 @@ Load in Chrome:
 
 ## Hosting The Policy (privately)
 
-The policy is intentionally **not** published from this repo (there is no public Pages workflow). Generate `policy/policy.json` with the build and host it somewhere your fleet can reach but the public cannot — e.g. an authenticated endpoint, a private bucket, or a separate private repo's Pages. Then either:
+The policy is intentionally **not** published from this repo (there is no public Pages workflow). See `policy/policy.example.json` for the exact JSON shape (you can copy it as a starting template, or generate your own with the build). Host it somewhere your fleet can reach but the public cannot — e.g. an authenticated endpoint, a private bucket, or a separate private repo's Pages. Then either:
 
 - paste the URL into the extension options page, or
 - for managed deployment, set it via Chrome managed storage key `policyUrl` (users then cannot edit it).
@@ -107,6 +108,7 @@ The extension is allowlist-first for sign-in protection:
 - Lookalike domains, protected-brand pages on untrusted hosts, punycode hosts, and suspicious form actions raise the score.
 - Content scripts run in all frames; child frames report findings to the top frame so only one warning UI renders.
 - Deny-listed hosts are also enforced with Manifest V3 dynamic `declarativeNetRequest` block rules.
+- The toolbar icon shows a guard-state badge: red **!** when **not protecting** (no real policy loaded — e.g. a generic build that has not been provisioned), amber **!** when protecting but the policy sync is failing or stale, and no badge when guarding normally. A placeholder `policyId` (`org-default`/`local-default`) with no successful sync counts as unconfigured, so a generic build distributed via the Web Store reads as "not protecting" until a real policy is provisioned (paste a policy URL, or push `policyUrl` via managed storage). The same state is shown as a banner on the options page.
 - Severity colour is consistent across surfaces: amber for warn, red for block, on banner, chip, and modal.
 - The modal's primary action is **Report to Internal Security** (copies a diagnostic blob to the clipboard and opens a prefilled `mailto:` to `reportEmail`); **Learn More** opens `infoUrl`; **Download a screenshot to attach** captures the page via the background `captureVisibleTab`.
 - The password-escape footer is only shown when the page actually involves a credential context; email-only/brand-only warnings get an informational modal.
