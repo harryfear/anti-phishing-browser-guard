@@ -13,9 +13,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Syntax-check extension scripts
+        run: |
+          for f in extension/shared.js extension/content.js extension/background.js extension/options.js; do
+            node --check "$f"
+          done
+
+      - name: Guard against brand leaks (repo must stay vendor-agnostic)
+        run: |
+          if git grep -niE 'neurobridge|nb-default' -- . ':!.github/workflows/validate.yml' ; then
+            echo "::error::Brand tell found in a tracked file — this public repo must stay vendor-agnostic (real values live only in gitignored config)."
+            exit 1
+          fi
+          echo "No brand tells in tracked files."
+
       - name: Build brand artifacts (generic example fallback)
         run: node scripts/build-brand.mjs
-      - name: Validate policy
+
+      - name: Validate generated policy
         run: node scripts/validate-policy.mjs policy/policy.json
+
+      - name: Validate example policy template
+        run: node scripts/validate-policy.mjs policy/policy.example.json
+
       - name: Check extension manifest
         run: node scripts/check-extension.mjs extension

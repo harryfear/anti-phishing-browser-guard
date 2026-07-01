@@ -10,12 +10,20 @@
 //   extension/manifest.json   from manifest.template.json with name/description injected
 //   policy/policy.json        the subscription policy to host privately
 
-import { readFile, writeFile, access } from "node:fs/promises";
+import { readFile, writeFile, access, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const p = (...parts) => resolve(root, ...parts);
+
+// Write a file, creating its parent directory first. The generated outputs
+// (policy/policy.json, extension/*) are gitignored, so their directory may not
+// exist in a fresh checkout — create it rather than failing with ENOENT.
+async function writeOut(file, contents) {
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, contents);
+}
 
 async function exists(file) {
   try {
@@ -150,7 +158,7 @@ async function main() {
   const policy = buildPolicy(cfg);
 
   // policy/policy.json — host this privately.
-  await writeFile(p("policy/policy.json"), JSON.stringify(policy, null, 2) + "\n");
+  await writeOut(p("policy/policy.json"), JSON.stringify(policy, null, 2) + "\n");
 
   // extension/brand.js — baked-in default policy (PhishGuardBrand), loaded before shared.js.
   const brandJs =
@@ -160,7 +168,7 @@ async function main() {
     JSON.stringify(policy, null, 2).replace(/\n/g, "\n  ") +
     ";\n" +
     "})(typeof globalThis !== \"undefined\" ? globalThis : self);\n";
-  await writeFile(p("extension/brand.js"), brandJs);
+  await writeOut(p("extension/brand.js"), brandJs);
 
   // extension/manifest.json — name/description injected.
   const tpl = JSON.parse(await readFile(p("extension/manifest.template.json"), "utf8"));
@@ -168,7 +176,7 @@ async function main() {
   tpl.name = ext.name || "Anti-Phishing Guard";
   tpl.description = ext.description || "Allowlist-first phishing guard with remote JSON policy updates.";
   if (tpl.action) tpl.action.default_title = tpl.name;
-  await writeFile(p("extension/manifest.json"), JSON.stringify(tpl, null, 2) + "\n");
+  await writeOut(p("extension/manifest.json"), JSON.stringify(tpl, null, 2) + "\n");
 
   const source = useReal ? "config/brand.yml" : "config/brand.example.yml (generic fallback)";
   console.log(`Brand build OK from ${source}: "${tpl.name}", policy ${policy.policyId} v${policy.version}`);
