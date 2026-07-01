@@ -1,0 +1,72 @@
+name: Codex review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Least privilege: read the code, write a PR comment. The OpenAI key is passed
+# ONLY to the codex-action step (never as a job-level env), per OpenAI's guidance.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  codex_review:
+    runs-on: ubuntu-latest
+    # Boolean only (never the key itself) — lets the job skip cleanly when the
+    # OPENAI_API_KEY secret hasn't been configured, instead of failing red.
+    env:
+      HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+    steps:
+      - name: Note when disabled
+        if: env.HAS_OPENAI_KEY != 'true'
+        run: echo "OPENAI_API_KEY secret not set — skipping Codex review. Add it in repo Settings → Secrets to enable."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_OPENAI_KEY == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Codex review
+        id: codex
+        if: env.HAS_OPENAI_KEY == 'true'
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          prompt: |
+            Red-team this pull request for ${{ github.repository }} — a browser
+            anti-phishing guard (Manifest V3 extension). Review ONLY the changes:
+
+              git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+
+            Prioritise, in this order:
+            1. Security regressions — could the change let a phishing page bypass
+               detection, self-unlock a block (the escape UI is a CLOSED shadow root
+               and must stay unreachable to page JS), or weaken credential/identity
+               checks? Treat catch-rate as paramount (false positives are preferred
+               to false negatives).
+            2. Correctness bugs and regressions in the detection engine
+               (extension/shared.js) and the warning UI (extension/content.js).
+            3. New false positives or false negatives, and any brand/vendor value
+               leaking into the (public, vendor-agnostic) repo.
+
+            Be concise and concrete: cite file:line and give a failing scenario.
+            Do not nitpick style. Do not modify any files.
+
+      - name: Post review comment
+        if: env.HAS_OPENAI_KEY == 'true' && steps.codex.outputs.final-message != ''
+        uses: actions/github-script@v7
+        env:
+          CODEX_FINAL_MESSAGE: ${{ steps.codex.outputs.final-message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: "### 🤖 Codex red-team review\n\n" + process.env.CODEX_FINAL_MESSAGE,
+            });
