@@ -122,6 +122,26 @@ Remote policy is JSON data only; it must not contain executable logic, and is tr
 
 For production hardening, add detached policy signing with a public key embedded in the extension. OAuth consent phishing against the genuine IdP is out of scope for this page-level guard.
 
+## Known limitations & roadmap
+
+- **Entered-value heuristic (rich-text surfaces).** To avoid false positives from
+  pages that merely *display* a protected email address — an online document, an
+  email compose box, a chat — the "was a protected email entered?" check only
+  accepts **short** values from non-`<input>` surfaces (`contenteditable` /
+  `role="textbox"` / `textarea`, capped at 120 characters). Genuine login fields
+  are `<input>` elements, which are always inspected regardless of length.
+  - **Trade-off:** a crafted phishing page could, in principle, use a long
+    non-input editable element as its "username" field and pad it past the cap to
+    evade protected-email detection. This is unrealistic in practice — an attacker
+    cannot lengthen the value the user actually types, padding is visible, and real
+    login fields are `<input>` — so the cap deliberately favours removing a common,
+    high-noise false positive over closing a narrow, contrived gap.
+  - **Roadmap / escalation point:** if this is ever observed being abused, replace
+    the length cap with input-type/role-aware field detection (treat only genuine
+    single-line credential fields as "entered"), and/or fold in autofill and
+    keystroke signals to distinguish text the user typed from content injected by
+    the page.
+
 ## Making The Repo Public
 
 `config/brand.yml` and the generated `extension/brand.js`, `extension/manifest.json`, and `policy/policy.json` are gitignored, so new commits stay generic. Two things to do before publishing:
