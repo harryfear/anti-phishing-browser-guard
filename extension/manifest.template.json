@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__EXT_NAME__",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "__EXT_DESCRIPTION__",
   "permissions": ["alarms", "declarativeNetRequest", "downloads", "storage"],
   "host_permissions": ["<all_urls>"],

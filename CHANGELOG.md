@@ -3,6 +3,16 @@
 All notable changes to the extension are documented here. This project follows
 semantic versioning.
 
+## [0.2.1] — 2026-07-01
+
+### Fixed
+
+- The "company email on an unapproved site" check no longer fires on a protected
+  address that merely *appears* in page content — e.g. an online document, email
+  compose box, or chat that displays the address. Only short field entries (and
+  real login `<input>`s) count as "entered", so a document that mentions your
+  security inbox no longer shows a false warning.
+
 ## [0.2.0] — 2026-06-30
 
 ### Added
@@ -33,14 +43,6 @@ semantic versioning.
 - **Reworked warning dialog.** Cleaner two-button layout (**Report to Internal
   Security…** / **Unlock Anyway…**); reporting opens a focused sub-modal with an
   optional screenshot; "Learn More" is demoted to a link at the foot.
-
-### Fixed
-
-- The "company email on an unapproved site" check no longer fires on a protected
-  address that merely *appears* in page content — e.g. an online document, email
-  compose box, or chat that displays the address. Only short field entries (and
-  real login `<input>`s) count as "entered", so a document that mentions your
-  security inbox no longer shows a false warning.
 
 ### Security
 
